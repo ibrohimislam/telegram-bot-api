@@ -7,7 +7,7 @@
 #include "telegram-bot-api/ClientManager.h"
 #include "telegram-bot-api/ClientParameters.h"
 #include "telegram-bot-api/HttpConnection.h"
-#include "telegram-bot-api/UnixHttpServer.h"
+#include "telegram-bot-api/HttpServer.h"
 #include "telegram-bot-api/HttpStatConnection.h"
 #include "telegram-bot-api/Stats.h"
 #include "telegram-bot-api/Watchdog.h"
