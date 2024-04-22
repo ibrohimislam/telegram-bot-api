@@ -52,6 +52,7 @@ void UnixListener::tear_down() {
   if (!server_fd_.empty()) {
     td::Scheduler::unsubscribe_before_close(server_fd_.get_poll_info().get_pollable_fd_ref());
     server_fd_.close();
+    unlink(path_.c_str());
   }
 }
 
