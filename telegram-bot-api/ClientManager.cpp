@@ -95,32 +95,6 @@ void ClientManager::send(PromisedQueryPtr query) {
       return fail_query(400, "Bad Request: the bot has already been closed", std::move(query));
     }
 
-    td::string ip_address = query->get_peer_ip_address();
-    if (!ip_address.empty()) {
-      td::IPAddress tmp;
-      tmp.init_host_port(ip_address, 0).ignore();
-      tmp.clear_ipv6_interface();
-      if (tmp.is_valid()) {
-        ip_address = tmp.get_ip_str().str();
-      }
-    }
-    LOG(DEBUG) << "Receive incoming query for new bot " << token << " from " << ip_address;
-    if (!ip_address.empty()) {
-      LOG(DEBUG) << "Check Client creation flood control for IP address " << ip_address;
-      auto res = flood_controls_.emplace(std::move(ip_address), td::FloodControlFast());
-      auto &flood_control = res.first->second;
-      if (res.second) {
-        flood_control.add_limit(60, 20);        // 20 in a minute
-        flood_control.add_limit(60 * 60, 600);  // 600 in an hour
-      }
-      auto now = td::Time::now();
-      auto wakeup_at = flood_control.get_wakeup_at();
-      if (wakeup_at > now) {
-        LOG(INFO) << "Failed to create Client from IP address " << ip_address;
-        return query->set_retry_after_error(static_cast<int>(wakeup_at - now) + 1);
-      }
-      flood_control.add_event(now);
-    }
     auto tqueue_id = get_tqueue_id(user_id, query->is_test_dc());
     if (active_client_count_.count(tqueue_id) != 0) {
       // return query->set_retry_after_error(1);

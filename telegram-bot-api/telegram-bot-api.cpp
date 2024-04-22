@@ -7,7 +7,7 @@
 #include "telegram-bot-api/ClientManager.h"
 #include "telegram-bot-api/ClientParameters.h"
 #include "telegram-bot-api/HttpConnection.h"
-#include "telegram-bot-api/HttpServer.h"
+#include "telegram-bot-api/UnixHttpServer.h"
 #include "telegram-bot-api/HttpStatConnection.h"
 #include "telegram-bot-api/Stats.h"
 #include "telegram-bot-api/Watchdog.h"
@@ -174,10 +174,7 @@ int main(int argc, char *argv[]) {
   td::OptionParser options;
   bool need_print_usage = false;
   bool need_print_version = false;
-  int http_port = 8081;
-  int http_stat_port = 0;
-  td::string http_ip_address = "0.0.0.0";
-  td::string http_stat_ip_address = "0.0.0.0";
+  td::string socket_path = "/run/telegram-bot-api/http.sock";
   td::string log_file_path;
   int default_verbosity_level = 0;
   int memory_verbosity_level = VERBOSITY_NAME(INFO);
@@ -219,10 +216,9 @@ int main(int argc, char *argv[]) {
                      "application identifier hash for Telegram API access, which can be obtained at "
                      "https://my.telegram.org (defaults to the value of the TELEGRAM_API_HASH environment variable)",
                      td::OptionParser::parse_string(parameters->api_hash_));
-  options.add_checked_option('p', "http-port", PSLICE() << "HTTP listening port (default is " << http_port << ")",
-                             td::OptionParser::parse_integer(http_port));
-  options.add_checked_option('s', "http-stat-port", "HTTP statistics port",
-                             td::OptionParser::parse_integer(http_stat_port));
+  options.add_option('\0', "unix-socket",
+                     "Socket listening path",
+                     td::OptionParser::parse_string(socket_path));
   options.add_option('d', "dir", "server working directory", td::OptionParser::parse_string(working_directory));
   options.add_option('t', "temp-dir", "directory for storing HTTP server temporary files",
                      td::OptionParser::parse_string(temporary_directory));
@@ -243,23 +239,6 @@ int main(int argc, char *argv[]) {
   options.add_checked_option('\0', "max-webhook-connections",
                              "default value of the maximum webhook connections per bot",
                              td::OptionParser::parse_integer(parameters->default_max_webhook_connections_));
-  options.add_checked_option('\0', "http-ip-address",
-                             "local IP address, HTTP connections to which will be accepted. By default, connections to "
-                             "any local IPv4 address are accepted",
-                             [&](td::Slice ip_address) {
-                               TRY_STATUS(td::IPAddress::get_ip_address(ip_address.str()));
-                               http_ip_address = ip_address.str();
-                               return td::Status::OK();
-                             });
-  options.add_checked_option('\0', "http-stat-ip-address",
-                             "local IP address, HTTP statistics connections to which will be accepted. By default, "
-                             "statistics connections to any local IPv4 address are accepted",
-                             [&](td::Slice ip_address) {
-                               TRY_STATUS(td::IPAddress::get_ip_address(ip_address.str()));
-                               http_stat_ip_address = ip_address.str();
-                               return td::Status::OK();
-                             });
-
   options.add_option('l', "log", "path to the file where the log will be written",
                      td::OptionParser::parse_string(log_file_path));
   options.add_checked_option('v', "verbosity", "log verbosity level",
@@ -457,7 +436,7 @@ int main(int argc, char *argv[]) {
 
   // LOG(WARNING) << "Bot API server with commit " << td::GitInfo::commit() << ' '
   //              << (td::GitInfo::is_dirty() ? "(dirty)" : "") << " started";
-  LOG(WARNING) << "Bot API " << parameters->version_ << " server started";
+  LOG(INFO) << "Bot API " << parameters->version_ << " server started";
 
   td::ConcurrentScheduler sched(SharedData::get_thread_count() - 1, cpu_affinity);
 
@@ -472,25 +451,15 @@ int main(int argc, char *argv[]) {
                                                                 std::move(parameters), token_range)
                             .release();
 
+  LOG(INFO) << "Open unix socket " << socket_path << " server started";
+
   sched
-      .create_actor_unsafe<HttpServer>(
-          SharedData::get_client_scheduler_id(), "HttpServer", http_ip_address, http_port,
+      .create_actor_unsafe<UnixHttpServer>(
+          SharedData::get_client_scheduler_id(), "UnixHttpServer", socket_path,
           [client_manager, shared_data] {
-            return td::ActorOwn<td::HttpInboundConnection::Callback>(
-                td::create_actor<HttpConnection>("HttpConnection", client_manager, shared_data));
+            return td::ActorOwn<td::HttpInboundConnection::Callback>(td::create_actor<HttpConnection>("HttpConnection", client_manager, shared_data));
           })
       .release();
-
-  if (http_stat_port != 0) {
-    sched
-        .create_actor_unsafe<HttpServer>(
-            SharedData::get_client_scheduler_id(), "HttpStatsServer", http_stat_ip_address, http_stat_port,
-            [client_manager] {
-              return td::ActorOwn<td::HttpInboundConnection::Callback>(
-                  td::create_actor<HttpStatConnection>("HttpStatConnection", client_manager));
-            })
-        .release();
-  }
 
   constexpr double WATCHDOG_TIMEOUT = 0.25;
   auto watchdog_id = sched.create_actor_unsafe<Watchdog>(SharedData::get_watchdog_scheduler_id(), "Watchdog",

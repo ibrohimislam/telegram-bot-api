@@ -90,12 +90,14 @@ set(TELEGRAM_BOT_API_SOURCE
   telegram-bot-api/Stats.cpp
   telegram-bot-api/Watchdog.cpp
   telegram-bot-api/WebhookActor.cpp
+  telegram-bot-api/UnixListener.cpp
 
   telegram-bot-api/Client.h
   telegram-bot-api/ClientManager.h
   telegram-bot-api/ClientParameters.h
   telegram-bot-api/HttpConnection.h
   telegram-bot-api/HttpServer.h
+  telegram-bot-api/UnixListener.h
   telegram-bot-api/HttpStatConnection.h
   telegram-bot-api/Query.h
   telegram-bot-api/Stats.h

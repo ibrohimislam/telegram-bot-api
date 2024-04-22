@@ -7,6 +7,7 @@
 #pragma once
 
 #include "telegram-bot-api/ClientParameters.h"
+#include "telegram-bot-api/UnixListener.h"
 
 #include "td/net/HttpInboundConnection.h"
 #include "td/net/TcpListener.h"
@@ -26,20 +27,17 @@
 
 namespace telegram_bot_api {
 
-class HttpServer final : public td::TcpListener::Callback {
+class UnixHttpServer final : public UnixListener::Callback {
  public:
-  HttpServer(td::string ip_address, int port,
-             std::function<td::ActorOwn<td::HttpInboundConnection::Callback>()> creator)
-      : ip_address_(std::move(ip_address)), port_(port), creator_(std::move(creator)) {
+  UnixHttpServer(td::string path, std::function<td::ActorOwn<td::HttpInboundConnection::Callback>()> creator): path_(std::move(path)), creator_(std::move(creator)) {
     flood_control_.add_limit(1, 1);    // 1 in a second
     flood_control_.add_limit(60, 10);  // 10 in a minute
   }
 
  private:
-  td::string ip_address_;
-  td::int32 port_;
+  td::string path_;
   std::function<td::ActorOwn<td::HttpInboundConnection::Callback>()> creator_;
-  td::ActorOwn<td::TcpListener> listener_;
+  td::ActorOwn<UnixListener> listener_;
   td::FloodControlFast flood_control_;
 
   void start_up() final {
@@ -50,10 +48,8 @@ class HttpServer final : public td::TcpListener::Callback {
       return;
     }
     flood_control_.add_event(now);
-    LOG(INFO) << "Create TCP listener " << td::tag("address", ip_address_) << td::tag("port", port_);
-    listener_ = td::create_actor<td::TcpListener>(
-        PSLICE() << "TcpListener" << td::tag("address", ip_address_) << td::tag("port", port_), port_,
-        actor_shared(this, 1), ip_address_);
+    LOG(INFO) << "Create Unix listener " << td::tag("unix", path_);
+    listener_ = td::create_actor<UnixListener>(PSLICE() << "UnixListener" << td::tag("path", path_), path_, actor_shared(this, 1));
   }
 
   void hangup_shared() final {
