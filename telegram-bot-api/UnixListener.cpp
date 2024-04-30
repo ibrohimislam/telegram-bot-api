@@ -38,6 +38,10 @@ void UnixListener::hangup() {
 }
 
 void UnixListener::start_up() {
+  if (access(path_.c_str(), F_OK) == 0) {
+    unlink(path_.c_str());
+  }
+
   auto r_socket = td::ServerSocketFd::open(path_);
   if (r_socket.is_error()) {
     LOG(ERROR) << "Can't open server socket: " << r_socket.error();
