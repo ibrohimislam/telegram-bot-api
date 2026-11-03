@@ -102,24 +102,39 @@ void ClientManager::send(PromisedQueryPtr query) {
       tmp.clear_ipv6_interface();
       if (tmp.is_valid()) {
         ip_address = tmp.get_ip_str().str();
+      } else {
+        // the address can come from a client-controlled header (x-real-ip), so don't use arbitrary strings as keys
+        LOG(DEBUG) << "Ignore invalid IP address " << ip_address;
+        ip_address.clear();
       }
     }
     LOG(DEBUG) << "Receive incoming query for new bot " << token << " from " << ip_address;
     if (!ip_address.empty()) {
       LOG(DEBUG) << "Check Client creation flood control for IP address " << ip_address;
-      auto res = flood_controls_.emplace(std::move(ip_address), td::FloodControlFast());
-      auto &flood_control = res.first->second;
-      if (res.second) {
-        flood_control.add_limit(60, 20);        // 20 in a minute
-        flood_control.add_limit(60 * 60, 600);  // 600 in an hour
-      }
       auto now = td::Time::now();
-      auto wakeup_at = flood_control.get_wakeup_at();
-      if (wakeup_at > now) {
-        LOG(INFO) << "Failed to create Client from IP address " << ip_address << " with token";
-        return query->set_retry_after_error(static_cast<int>(wakeup_at - now) + 1);
+      if (flood_controls_.size() >= MAX_FLOOD_CONTROL_COUNT && flood_controls_.count(ip_address) == 0) {
+        gc_flood_controls(now);
       }
-      flood_control.add_event(now);
+      if (flood_controls_.size() >= MAX_FLOOD_CONTROL_COUNT && flood_controls_.count(ip_address) == 0) {
+        // too many recently active addresses; rely on the global flood control only
+        LOG(WARNING) << "Skip per-IP flood control for " << ip_address << ", because there are too many entries";
+      } else {
+        auto res = flood_controls_.emplace(ip_address, FloodControlInfo());
+        auto &info = res.first->second;
+        auto &flood_control = info.control_;
+        if (res.second) {
+          flood_control.add_limit(60, 20);        // 20 in a minute
+          flood_control.add_limit(60 * 60, 600);  // 600 in an hour
+        }
+        auto wakeup_at = flood_control.get_wakeup_at();
+        if (wakeup_at > now) {
+          info.last_used_ = now;
+          LOG(INFO) << "Failed to create Client from IP address " << ip_address << " with token";
+          return query->set_retry_after_error(static_cast<int>(wakeup_at - now) + 1);
+        }
+        flood_control.add_event(now);
+        info.last_used_ = now;
+      }
     }
     if (is_global_flood_control_enabled_) {
       auto now = td::Time::now();
@@ -541,6 +556,22 @@ void ClientManager::raw_event(const td::Event::Raw &event) {
   }
 }
 
+void ClientManager::gc_flood_controls(double now) {
+  td::vector<td::string> expired_keys;
+  for (auto &it : flood_controls_) {
+    if (now - it.second.last_used_ > FLOOD_CONTROL_IDLE_TIME) {
+      expired_keys.push_back(it.first);
+    }
+  }
+  for (auto &key : expired_keys) {
+    flood_controls_.erase(key);
+  }
+  if (!expired_keys.empty()) {
+    LOG(INFO) << "Flood control GC deleted " << expired_keys.size() << " entries, " << flood_controls_.size()
+              << " left";
+  }
+}
+
 void ClientManager::timeout_expired() {
   send_closure(watchdog_id_, &Watchdog::kick);
   set_timeout_in(WATCHDOG_TIMEOUT / 10);
@@ -560,6 +591,11 @@ void ClientManager::timeout_expired() {
       LOG(WARNING) << "TQueue GC already deleted " << tqueue_deleted_events_ << " events since the start";
       last_tqueue_deleted_events_ = tqueue_deleted_events_;
     }
+  }
+
+  if (now > next_flood_control_gc_time_) {
+    gc_flood_controls(now);
+    next_flood_control_gc_time_ = now + FLOOD_CONTROL_GC_PERIOD;
   }
 
   if (!is_global_flood_control_enabled_ && !parameters_->local_mode_) {

@@ -9407,6 +9407,12 @@ void Client::on_update_authorization_state() {
         send_request(make_object<td_api::setOption>(option, make_object<td_api::optionValueBoolean>(true)),
                      td::make_unique<TdOnOkCallback>());
       }
+      if (parameters_->message_unload_delay_ > 0) {
+        send_request(make_object<td_api::setOption>(
+                         "message_unload_delay",
+                         make_object<td_api::optionValueInteger>(parameters_->message_unload_delay_)),
+                     td::make_unique<TdOnOkCallback>());
+      }
 
       auto request = make_object<td_api::setTdlibParameters>();
       request->use_test_dc_ = is_test_dc_;
@@ -19506,7 +19512,12 @@ void Client::process_new_guest_query_queue(int64 chat_id, int state) {
 }
 
 td::unique_ptr<Client::MessageInfo> Client::delete_message(int64 chat_id, int64 message_id, bool only_from_cache) {
-  auto message_info = std::move(messages_[{chat_id, message_id}]);
+  td::unique_ptr<MessageInfo> message_info;
+  if (messages_.get_pointer({chat_id, message_id}) != nullptr) {
+    // don't use operator[] for a missing message, because it would leave an empty slot in the map
+    message_info = std::move(messages_[{chat_id, message_id}]);
+    messages_.erase({chat_id, message_id});
+  }
   if (message_info == nullptr) {
     if (yet_unsent_messages_.count({chat_id, message_id}) > 0) {
       // yet unsent message is deleted, possible only if we are trying to write to inaccessible supergroup or
@@ -19531,8 +19542,6 @@ td::unique_ptr<Client::MessageInfo> Client::delete_message(int64 chat_id, int64 
 
       on_message_send_failed(chat_id, message_id, 0, std::move(error));
     }
-  } else {
-    messages_.erase({chat_id, message_id});
   }
   return message_info;
 }

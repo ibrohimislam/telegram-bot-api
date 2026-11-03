@@ -220,6 +220,17 @@ int main(int argc, char *argv[]) {
   options.add_option('\0', "unix-socket",
                      "Socket listening path",
                      td::OptionParser::parse_string(socket_path));
+  options.add_checked_option('\0', "message-unload-delay",
+                             "time in seconds (60-86400) after which idle messages are dropped from memory caches (defaults to "
+                             "TDLib's value of 1800); lower values reduce memory usage",
+                             [&](td::Slice delay) {
+                               TRY_RESULT(value, td::to_integer_safe<td::int32>(delay));
+                               if (value < 60 || value > 86400) {
+                                 return td::Status::Error("Wrong argument specified: delay must be from 60 to 86400");
+                               }
+                               parameters->message_unload_delay_ = value;
+                               return td::Status::OK();
+                             });
   options.add_option('d', "dir", "server working directory", td::OptionParser::parse_string(working_directory));
   options.add_option('f', "files-dir", "directory for storing auxiliary files (defaults to the working directory)",
                      td::OptionParser::parse_string(files_directory));

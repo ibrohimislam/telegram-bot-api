@@ -116,6 +116,7 @@ struct ClientParameters {
   td::string version_;
 
   td::int32 default_max_webhook_connections_ = 0;
+  td::int32 message_unload_delay_ = 0;  // seconds; 0 means the TDLib default
   td::IPAddress webhook_proxy_ip_address_;
 
   double start_time_ = 0;

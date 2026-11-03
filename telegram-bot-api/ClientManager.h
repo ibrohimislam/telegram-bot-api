@@ -65,7 +65,11 @@ class ClientManager final : public td::Actor {
   TokenRange token_range_;
 
   td::FlatHashMap<td::string, td::uint64> token_to_id_;
-  td::FlatHashMap<td::string, td::FloodControlFast> flood_controls_;
+  struct FloodControlInfo {
+    td::FloodControlFast control_;
+    double last_used_ = 0.0;
+  };
+  td::FlatHashMap<td::string, FloodControlInfo> flood_controls_;
   td::FloodControlFast global_flood_control_;
   bool is_global_flood_control_enabled_ = false;
   td::FlatHashMap<td::int64, td::uint64> active_client_count_;
@@ -75,10 +79,19 @@ class ClientManager final : public td::Actor {
 
   td::ActorOwn<Watchdog> watchdog_id_;
   double next_tqueue_gc_time_ = 0.0;
+  double next_flood_control_gc_time_ = 0.0;
   td::int64 tqueue_deleted_events_ = 0;
   td::int64 last_tqueue_deleted_events_ = 0;
 
   static constexpr double WATCHDOG_TIMEOUT = 0.25;
+
+  // the longest limit of the per-IP Client creation flood control is one hour, so an entry unused for longer
+  // than that is equivalent to a newly created one
+  static constexpr double FLOOD_CONTROL_IDLE_TIME = 60 * 60 + 60;
+  static constexpr double FLOOD_CONTROL_GC_PERIOD = 60.0;
+  static constexpr size_t MAX_FLOOD_CONTROL_COUNT = 100000;
+
+  void gc_flood_controls(double now);
 
   static td::int64 get_tqueue_id(td::int64 user_id, bool is_test_dc);
 
